@@ -1,0 +1,346 @@
+---
+title: "Modeling"
+output: html_notebook
+---
+
+Traffic Attributes (12):
+ID: This is a unique identifier of the accident record.
+Source: Indicates source of the accident report (i.e. the API which reported the accident.).
+TMC: A traffic accident may have a Traffic Message Channel (TMC) code which provides more detailed description of the event.
+Severity: Shows the severity of the accident, a number between 1 and 4, where 1 indicates the least impact on traffic (i.e., short delay as a result of the accident) and 4 indicates a significant impact on traffic (i.e., long delay).
+Start_Time: Shows start time of the accident in local time zone.
+End_Time: Shows end time of the accident in local time zone.
+Start_Lat: Shows latitude in GPS coordinate of the start point.
+Start_Lng: Shows longitude in GPS coordinate of the start point.
+End_Lat: Shows latitude in GPS coordinate of the end point.
+End_Lng: Shows longitude in GPS coordinate of the end point.
+Distance(mi): The length of the road extent affected by the accident.
+Description: Shows natural language description of the accident.
+
+Address Attributes (9):
+Number: Shows the street number in address field.
+Street: Shows the street name in address field.
+Side: Shows the relative side of the street (Right/Left) in address field.
+City: Shows the city in address field.
+County: Shows the county in address field.
+State: Shows the state in address field.
+Zipcode: Shows the zipcode in address field.
+Country: Shows the country in address field.
+Timezone: Shows timezone based on the location of the accident (eastern, central, etc.).
+
+Weather Attributes (11):
+Airport_Code: Denotes an airport-based weather station which is the closest one to location of the accident.
+Weather_Timestamp: Shows the time-stamp of weather observation record (in local time).
+Temperature(F): Shows the temperature (in Fahrenheit).
+Wind_Chill(F): Shows the wind chill (in Fahrenheit).
+Humidity(%): Shows the humidity (in percentage).
+Pressure(in): Shows the air pressure (in inches).
+Visibility(mi): Shows visibility (in miles).
+Wind_Direction: Shows wind direction.
+Wind_Speed(mph): Shows wind speed (in miles per hour).
+Precipitation(in): Shows precipitation amount in inches, if there is any.
+Weather_Condition: Shows the weather condition (rain, snow, thunderstorm, fog, etc.).
+
+POI Attributes (13):
+Amenity: A Point-Of-Interest (POI) annotation which indicates presence of amenity in a nearby location.
+Bump: A POI annotation which indicates presence of speed bump or hump in a nearby location.
+Crossing: A POI annotation which indicates presence of crossing in a nearby location.
+Give_Way: A POI annotation which indicates presence of give_way sign in a nearby location.
+Junction: A POI annotation which indicates presence of junction in a nearby location.
+No_Exit: A POI annotation which indicates presence of no_exit sign in a nearby location.
+Railway: A POI annotation which indicates presence of railway in a nearby location.
+Roundabout: A POI annotation which indicates presence of roundabout in a nearby location.
+Station: A POI annotation which indicates presence of station (bus, train, etc.) in a nearby location.
+Stop: A POI annotation which indicates presence of stop sign in a nearby location.
+Traffic_Calming: A POI annotation which indicates presence of traffic_calming means in a nearby location.
+Traffic_Signal: A POI annotation which indicates presence of traffic_signal in a nearby location.
+Turning_Loop: A POI annotation which indicates presence of turning_loop in a nearby location.
+
+Period-of-Day (4):
+Sunrise_Sunset: Shows the period of day (i.e. day or night) based on sunrise/sunset.
+Civil_Twilight: Shows the period of day (i.e. day or night) based on civil twilight.
+Nautical_Twilight: Shows the period of day (i.e. day or night) based on nautical twilight.
+Astronomical_Twilight: Shows the period of day (i.e. day or night) based on astronomical twilight.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(randomForest)
+library(caTools)
+library(rpart)
+library(caret)
+library(e1071)
+library(ISLR)
+library(randomForest)
+library(mlr3)
+```
+
+```{r}
+df <- read.csv("df.csv")
+```
+
+```{r}
+head(df)
+```
+
+```{r}
+# fix datetime type
+df$Start_Time <- as.Date(df$Start_Time)
+df$End_Time <- as.Date(df$End_Time)
+df$Weather_Timestamp = as.Date(df$Weather_Timestamp)
+
+```
+
+<!-- Dropping columns that are not relevant -->
+<!-- ```{r} -->
+<!-- df <- dplyr::select(df,-c(ID,Description,`Distance(mi)`,End_Time,Duration,End_Lat,End_Lng)) -->
+<!-- #head(df) -->
+<!-- ``` -->
+
+```{r}
+df$X = NULL
+df$ID = NULL
+df$Description = NULL
+df$Distance.mi. = NULL
+df$End_Time = NULL
+df$End_Lat = NULL
+df$End_Lng = NULL
+df$Number = NULL
+```
+
+```{r}
+dim(df)
+```
+
+
+```{r}
+df$Wind_Chill.F. = NULL #irrelevant
+
+```
+
+
+```{r}
+df <- df[complete.cases(df),]
+```
+
+```{r}
+summary(df)
+```
+
+# sum(is.na(df)) #sum
+# (colSums(is.na(df))/1516064)*100 #percentage of missing vals
+```{r}
+df$Severity <- as.factor(df$Severity)
+```
+
+
+<!-- dropping observations with missing values -->
+
+#df %>% drop_na(City)
+#df[complete.cases(df$City),]
+#df %>% na.omit(df$City)
+#df[complete.cases(df$Zipcode),]
+#df %>% drop_na(Zipcode)
+#df[complete.cases(df$Airport_Code),]
+#df %>% drop_na(Airport_Code)
+#df[complete.cases(df$Sunrise_Sunset),]
+#df %>% drop_na(Sunrise_Sunset)
+#df <- na.omit(df$Sunrise_Sunset)
+#df[complete.cases(df$Civil_Twilight),]
+#df <- na.omit(df$Civil_Twilight)
+#df[complete.cases(df$Nautical_Twilight),]
+#df <- na.omit(df$Nautical_Twilight)
+#df[complete.cases(df$Astronomical_Twilight),]
+#df <- na.omit(df$Astronomical_Twilight)
+#df <- df[rowSums(is.na(df)) == 0,]
+
+
+```{r}
+df$County = NULL
+```
+
+
+```{r}
+library(tidyr)
+```
+
+```{r}
+head(df)
+```
+```{r}
+#convert to factors
+df$Street <- as.factor(df$Street)
+df$Side <- as.factor(df$Side)
+df$City <- as.factor(df$City)
+df$State <- as.factor(df$State)
+df$Zipcode <- as.integer(df$Zipcode)
+df$Country <- as.factor(df$Country)
+df$Timezone <- as.factor(df$Timezone)
+df$Airport_Code <- as.factor(df$Airport_Code)
+df$Wind_Direction <- as.factor(df$Wind_Direction)
+df$Weather_Condition <-as.factor(df$Weather_Condition)
+df$Amenity <- as.factor(df$Amenity)
+df$Bump <- as.factor(df$Bump)
+df$Crossing <- as.factor(df$Crossing)
+df$Give_Way <- as.factor(df$Give_Way)
+df$Junction <- as.factor(df$Junction)
+df$No_Exit <- as.factor(df$No_Exit)
+df$Railway <- as.factor(df$Railway)
+df$Roundabout <- as.factor(df$Roundabout)
+df$Station <- as.factor(df$Station)
+df$Stop <- as.factor(df$Stop)
+df$Traffic_Calming <- as.factor(df$Traffic_Calming)
+df$Traffic_Signal <- as.factor(df$Traffic_Signal)
+df$Turning_Loop <- as.factor(df$Turning_Loop)
+df$Sunrise_Sunset <- as.factor(df$Sunrise_Sunset)
+df$Civil_Twilight <- as.factor(df$Civil_Twilight)
+df$Nautical_Twilight <- as.factor(df$Nautical_Twilight)
+df$Astronomical_Twilight <- as.factor(df$Astronomical_Twilight)
+```
+```{r}
+df <- df[complete.cases(df),]
+```
+
+```{r}
+str(df)
+```
+```{r}
+df$Turning_Loop <- NULL #one factor
+df$Country <- NULL
+```
+
+```{r}
+sev <- df$Severity # save target column to an array before encoding and scaling
+```
+
+```{r}
+library(caret)
+
+dmy <- dummyVars(" ~.", data=df)
+dat_transformed <- data.frame(predict(dmy, newdata = df))
+
+glimpse(dat_transformed)
+```
+```{r}
+colnames(dat_transformed)
+```
+```{r}
+df1 <- dat_transformed
+```
+
+```{r}
+colnames(df)
+```
+
+```{r}
+df1$Severity.1 <- NULL
+df1$Street.0S539.Summit.Ave <- NULL
+df1$Side.L <- NULL
+df1$City.Aberdeen <- NULL
+df1$State.AL <- NULL
+df1$Timezone.US.Central <- NULL
+df1$Airport_Code.K04W <- NULL
+df1$Wind_Direction.CALM <- NULL
+df1$Weather_Condition.Blowing.Snow <- NULL
+df1$Amenity.FALSE <- NULL
+df1$Bump.FALSE <- NULL
+df1$Crossing.FALSE <- NULL
+df1$Give_Way.FALSE <- NULL
+df1$Junction.FALSE <- NULL
+df1$No_Exit.FALSE <- NULL
+df1$Railway.FALSE <- NULL
+df1$Roundabout.FALSE <- NULL
+df1$Station.FALSE <- NULL
+df1$Stop.FALSE <- NULL
+df1$Traffic_Calming.FALSE <- NULL
+df1$Traffic_Signal.FALSE <- NULL
+df1$Sunrise_Sunset.Night <- NULL
+df1$Civil_Twilight.Night <- NULL
+df1$Nautical_Twilight.Night <- NULL
+df1$Astronomical_Twilight.Night <- NULL
+```
+
+```{r}
+df1$Severity.2 <- NULL
+df1$Severity.3 <- NULL
+df1$Severity.4 <- NULL 
+```
+
+```{r} 
+#min-max
+process <- preProcess(as.data.frame(df1), method = c("range"))
+norm_scale <- predict(process, as.data.frame(df1))
+```
+```{r}
+head(norm_scale)
+```
+```{r}
+sev
+```
+
+```{r}
+df2 <- norm_scale #encoded and scaled data
+head(df2)
+```
+```{r}
+df2$Severity <- sev
+```
+
+```{r}
+str(df2$Severity)
+```
+```{r}
+df2$Start_Time <- NULL
+```
+
+```{r}
+library(caTools)
+set.seed(100)
+sample = sample.split(df2$Severity, SplitRatio = 0.75)
+train = subset(df2, sample == T)
+test = subset(df2, sample == F)
+```
+
+```{r}
+library(caret)
+```
+
+```{r}
+dim(train)
+```
+
+```{r}
+dim(test)
+```
+
+```{r}
+levels(df$Severity)
+```
+```{r}
+svm1 <- svm(Severity~., data=train, 
+          method="C-classification", kernal="radial", 
+          gamma=0.1, cost=10)
+```
+```{r}
+summary(svm1)
+```
+```{r}
+prediction <- predict(svm1, test)
+xtab <- table(test$Severity, prediction)
+xtab
+```
+```{r}
+#install.packages("performanceEstimation")
+```
+```{r}
+library(e1071)
+#accuracy
+sum(diag(xtab))/sum(xtab)
+```
+```{r}
+diag(xtab)/rowSums(xtab) # for each class per obs
+```
+```{r}
+diag(xtab)/colSums(xtab) #For each class per prediction
+```
+

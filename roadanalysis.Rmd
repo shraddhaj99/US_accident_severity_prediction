@@ -1,0 +1,444 @@
+```{r}
+## Importing packages
+
+library(tidyverse)
+library(lubridate)
+library(RColorBrewer)
+library(viridis)
+library(ggcorrplot)
+library(VIM)
+library(stringr)
+options(warn=-1)
+library(scales)
+
+```
+
+Reading data file into "data"
+```{r}
+data <- read_csv("D:/Insurance Project/data.csv")
+```
+
+```{r}
+cat("Dataset has over 3 million rows. Dimension of the data frame : ", dim(data))
+head(data, 4)
+```
+
+Taking a small sample from the data to work with
+```{r}
+df <- data[sample(nrow(data), 500000), ]
+
+cat("Taking a sample of the data makes it more manageable to work with yet provides statistically significant insights. \nSample dimensions : ", dim(df))
+```
+
+Handling 
+```{r}
+# drop Lat and Lng, wind chill is the same as temp
+df[,c('End_Lat', 'End_Lng', "Number", "TMC", "Description",
+      "Source", "Wind_Chill(F)")] <- NULL
+
+# change Precipitation NA's to 0
+df[is.na(df$`Precipitation(in)`),]$`Precipitation(in)` = 0
+
+# ----  wind speed and direction  -------
+ws <- df[is.na(df$`Wind_Speed(mph)`),][c("Wind_Speed(mph)", "Wind_Direction")]
+# seems like a lot of the missing wind speed are associated with 
+# calm conditions so I will set missing wind speed = 0
+df[is.na(df$`Wind_Speed(mph)`),]$`Wind_Speed(mph)` = 0
+
+#  ---- waether conditions  ------
+wc <- df[is.na(df$Weather_Condition),][c("Weather_Condition", 
+        "Visibility(mi)","Humidity(%)", "Temperature(F)", 
+        "Pressure(in)","Wind_Direction","Wind_Speed(mph)")]
+
+#  ----- drop remaining missing values --------
+df <- df[complete.cases(df),]
+cat("Reassign or remove missing Values. Total missig values now = ",sum(is.na(df)))
+cat("\nSample dimensions now : ", dim(df))
+```
+
+
+```{r}
+cat("Separate variable 'Street' into Highway and City streets")
+
+#--------------------------------------------
+####     data type transformations      #####
+#--------------------------------------------
+
+# ----Street - Break into City and Highway -----
+df <- df %>% mutate(road_type = case_when(
+  str_detect(Street, "Fwy|Expy|Highway|US-|I-") ~ "Highway",
+  !str_detect(Street, "Fwy|Expy|Highway|US-|I-") ~ "City")) %>% 
+  mutate(road_type = as.factor(road_type)) 
+table(df$road_type)
+
+# drop the original variable (street)
+df$Street <- NULL
+```
+
+
+```{r}
+cat("Add new time based variables for hour & day")
+
+#----------------------------------------
+#####     Time of Day Variables     #####
+#----------------------------------------
+
+df$hr <- lubridate::hour(df$Start_Time)
+df$day <- lubridate::day(df$Start_Time)
+df$week <- lubridate::week(df$Start_Time)
+df$month <- lubridate::month(df$Start_Time)
+df$Weekday <- lubridate::wday(df$Start_Time, label=T, abbr=F)
+df$Weekdaya <- lubridate::wday(df$Start_Time, label=T, abbr=T)
+
+df %>% select(hr,day, week, month, Weekday) %>% head(4)
+```
+
+
+```{r}
+# ---- Character to Factor then Numeric  ---------
+
+# character dadf types change to Factor then Numeric
+chr_col <- c("Severity", "ID", "Side", "City", "County", "State", "Zipcode",
+             "Country", "Timezone", "Airport_Code", "Wind_Direction", "Weather_Condition",
+             "Sunrise_Sunset", "Civil_Twilight", "Nautical_Twilight", 
+             "Astronomical_Twilight")
+#str(df[, chr_col])
+
+df[, chr_col] <- df %>% 
+  select("Severity", "ID", "Side", "City", "County", "State", "Zipcode",
+         "Country", "Timezone", "Airport_Code", "Wind_Direction", 
+         "Weather_Condition","Sunrise_Sunset", "Civil_Twilight", 
+         "Nautical_Twilight", "Astronomical_Twilight") %>% 
+  lapply(as.factor)
+```
+
+
+```{r}
+# --- Boolean to Factor then Numeric  -------
+boo_col <- c("Amenity", "Bump", "Crossing", "Give_Way", "Junction",
+             "No_Exit", "Railway", "Roundabout", "Station", "Stop",
+             "Traffic_Calming", "Traffic_Signal", "Turning_Loop")
+
+df[, boo_col] <- df %>% 
+  select("Amenity", "Bump", "Crossing", "Give_Way", "Junction",
+         "No_Exit", "Railway", "Roundabout", "Station", "Stop",
+         "Traffic_Calming", "Traffic_Signal", "Turning_Loop") %>% 
+  lapply(as.factor)
+```
+
+
+
+
+
+```{r}
+# table(df$Traffic_Signal)
+# str(df$Traffic_Signal)
+df <- df %>% mutate(Traffic_Signal = fct_recode(Traffic_Signal,
+                              "No Signal" = "FALSE",
+                              "Traffic Signal" = "TRUE"))
+# str(df$Side)
+# table(df$Side)
+df <- df %>% mutate(Side = fct_recode(Side,
+                                "Left Side" = "L",
+                                "Right Side" = "R"))
+# table(df$Crossing)
+df <- df %>% mutate(Crossing = fct_recode(Crossing,
+                                    "No Crossing" = "FALSE",
+                                    "Traffic Crossing" = "TRUE"))
+# table(df$Severity)
+# str(df$Severity)
+df <- df %>% mutate(Severity = fct_recode(Severity,
+                                   'Low' = '1',
+                                   'Medium' = '2',
+                                   'High' = '3',
+                                   'Severe' = '4'))
+#table(df$Severity)
+# there are every few Severity = 1 so I will not include 1
+#df <- df[!(df$Severity == "Low"), ]
+df <- df %>% filter(!(Severity %in% 'Low'))
+cat("Factor recode for presentation purposes")
+```
+```{r}
+#----------------------------------------------
+#####    data exploration visualization   #####
+#----------------------------------------------
+
+#display.brewer.pal(3, "YlOrRd")
+pal = brewer.pal(3, "YlOrRd")
+
+#--- Severity by accident count -----
+
+options(repr.plot.width=10, repr.plot.height=8)
+ggplot(df, aes(Severity, fill = Severity)) + geom_bar(stat = "count", color = "gray") +
+  labs(x = "", y = "Count of Accidents", title = "Accidents by Severity") +   
+  scale_fill_manual(values=pal) + theme_light(base_size = 18) +
+  scale_y_continuous(labels = scales::comma)
+```
+```{r}
+#--- Severity by accident count & road type  -----
+options(repr.plot.width=12, repr.plot.height=8)
+ggplot(df, aes(Severity, fill = Severity)) + geom_bar(stat = "count", 
+  color = "gray") + facet_grid(~road_type) + labs(x = "", y = "Count of Accidents", 
+  title = "Accidents by Road Type & Severity") + scale_fill_manual(values=pal) + 
+  theme_light(base_size = 18) + 
+  theme(strip.background = element_rect(fill="grey90")) +
+  theme(strip.text = element_text(size = 16, color = 'black')) +
+  scale_y_continuous(labels = scales::comma)
+
+```
+
+
+```{r}
+#--- Severity by accident count & traffic signal  -----
+ggplot(df, aes(Severity, fill = Severity)) + geom_bar(stat = "count", color="grey") + 
+  facet_grid(~Traffic_Signal) + labs(x = "", y = "Count of Accidents", 
+  title = "Accidents by Traffic Signal & Severity") + scale_fill_manual(values=pal) + 
+  theme_light(base_size = 18) + 
+  theme(strip.background = element_rect(fill="grey90")) +
+  theme(strip.text = element_text(size = 18, color = 'black')) +
+  scale_y_continuous(labels = scales::comma)
+```
+
+
+```{r}
+#--- Severity by accident count & Crossing  -----
+pal = brewer.pal(3, "YlOrRd")
+ggplot(df, aes(Severity, fill = Severity)) + geom_bar(stat = "count", color="grey") + 
+  facet_grid(~Crossing) + labs(x = "", y = "Count of Accidents", 
+  title = "Accidents by Traffic Crossing & Severity") + scale_fill_manual(values=pal) + 
+  theme_light(base_size = 18) + 
+  theme(strip.background = element_rect(fill="grey90")) +
+  theme(strip.text = element_text(size = 18, color = 'black')) +
+  scale_y_continuous(labels = scales::comma)
+```
+
+
+```{r}
+#--- Severity by accident count & Astronomical_Twilight  -----
+options(repr.plot.width=12, repr.plot.height=8)
+pal = brewer.pal(3, "YlOrRd")
+options(repr.plot.width=12, repr.plot.height=8)
+ggplot(df, aes(Severity, fill = Severity)) + geom_bar(stat = "count", color = "gray") + 
+  facet_grid(~Astronomical_Twilight) + labs(x = "", y = "Count of Accidents", 
+  title = "Accidents by Night or Day & Severity") + scale_fill_manual(values=pal) + 
+  theme_light(base_size = 18) + 
+  theme(strip.background = element_rect(fill="grey90")) +
+  theme(strip.text = element_text(size = 18, color = 'black')) +
+  scale_y_continuous(labels = scales::comma)
+
+```
+
+
+```{r}
+#--- Severity by accident count & Side  -----
+ggplot(df, aes(Severity, fill = Severity)) + geom_bar(stat = "count", color="grey") + 
+  facet_grid(~Side) + labs(x = "", y = "Count of Accidents", 
+  title = "Accidents by Side of Street & Severity") + scale_fill_manual(values=pal) + 
+  theme_light(base_size = 18) + 
+  theme(strip.background = element_rect(fill="grey90")) +
+  theme(strip.text = element_text(size = 18, color = 'black')) +
+  scale_y_continuous(labels = scales::comma)
+
+```
+```{r}
+# ----   `Precipitation(in)`   -------
+
+options(repr.plot.width=12, repr.plot.height=6)
+ggplot(df, aes(`Precipitation(in)`)) + geom_histogram(fill = "lightskyblue", bins = 30) +
+  labs(title = "Precipation Histogram : Zero rain is most common") + theme_light(base_size = 18) +
+scale_y_continuous(labels = scales::comma)
+```
+
+
+```{r}
+# ----  histogram of precipitation  ------
+df %>% filter(`Precipitation(in)` > 0 & `Precipitation(in)` < 2) %>%
+  ggplot(aes(`Precipitation(in)`)) + geom_histogram(bins = 40, fill ="lightskyblue") + 
+  labs(title = "Precipation greater than zero") + 
+  theme_light(base_size = 18) + scale_y_continuous(labels = scales::comma)
+```
+
+
+```{r}
+# ----  No rain and Severity  ------------
+
+options(repr.plot.width=12, repr.plot.height=8)
+a <- df %>% filter(`Precipitation(in)` < 0.01)
+# max(a$`Precipitation(in)`)
+df %>% filter(`Precipitation(in)` < 0.01) %>%
+  group_by(Severity) %>%
+  summarise(n = n()) %>%
+  ggplot(aes(Severity, n, fill = Severity)) + 
+  geom_bar(stat = "identity", color = "gray") +
+  labs(title = "No Precipation & Severity") + scale_fill_manual(values=pal) + 
+  theme_light(base_size = 18) + scale_y_continuous(labels = scales::comma)
+```
+
+
+```{r}
+cat("Chart is the same as overall Accident Counts. Majority of accidents occur when it is not raining")
+# ---- some rain and severity  -----------
+df %>% filter(`Precipitation(in)` > 0 & `Precipitation(in)` < 0.5) %>%
+  ggplot(aes(Severity, `Precipitation(in)`, fill = Severity)) +
+  geom_boxplot(color = "gray30") + labs(x = "", y = "Precipitation(in)", 
+  title = "Accidents by Precipitaion & Severity") + scale_fill_manual(values=pal) + 
+  theme_light(base_size = 18) + scale_y_continuous(labels = scales::comma)
+```
+
+
+```{r}
+# -----   Weather Conditions  ----------
+
+df %>% group_by(Weather_Condition) %>%
+  summarise(n = n()) %>%
+  filter(n > 6000) %>%
+  ggplot(aes(fct_reorder(Weather_Condition, n),n, fill = Weather_Condition)) + 
+  geom_bar(stat = "identity", color="grey") + coord_flip() +
+  labs(x = "", y = "Count of Accidents", 
+       title = "High Accident Count by Weather Conditions") + 
+  scale_fill_brewer(palette = rev("Oranges")) + theme_light(base_size = 18) +
+  scale_y_continuous(labels = scales::comma)
+```
+
+
+```{r}
+# ----   more than 250 accidents   -----
+
+df %>% group_by(Weather_Condition, Severity) %>%
+  summarise(n = n()) %>%
+  filter(n > 6000) %>%
+  ggplot(aes(fct_reorder(Weather_Condition, n), n, fill=Weather_Condition)) + 
+  geom_bar(stat = "identity", show.legend = F, color = "gray") + 
+  facet_grid(~Severity) + coord_flip() + labs(x = "", y = "Count of Accidents", 
+     title = "High Accident Count by Weather Conditions & Severity") +
+  scale_fill_brewer(palette = rev("Oranges")) + theme_light(base_size = 18) +
+  theme(strip.background = element_rect(fill="grey90")) +
+  theme(strip.text = element_text(size = 16, color = 'black')) +
+  scale_y_continuous(labels = scales::comma)
+```
+
+
+```{r}
+# ----  less than 50 accidents -----
+options(repr.plot.width=12, repr.plot.height=16)
+df %>% group_by(Weather_Condition, Severity) %>%
+  summarise(n = n()) %>%
+  filter(n < 2000 ) %>%
+  ggplot(aes(fct_reorder(Weather_Condition, n), n, fill=Weather_Condition)) + 
+  geom_bar(stat = "identity", show.legend = F) + facet_grid(~Severity) + 
+  labs(title = "Low Accident Count by Weather Conditions and Severity",
+       x = "Accident Count", y = "Weather Conditions") +
+  coord_flip() + theme_light(base_size = 16) +
+  theme(strip.background = element_rect(fill="grey90")) +
+  theme(strip.text = element_text(size = 16, color = 'black')) +
+  scale_y_continuous(labels = scales::comma)
+```
+```{r}
+#--------------------------------------
+#####        by day of week      ######
+#--------------------------------------
+ 
+d <- df %>% group_by(Weekday, Weekdaya) %>%
+  summarise(n = n())
+
+# ---   Weekday and accident count ------
+#pal = brewer.pal(7, "Oranges")
+ggplot(d, aes(Weekday, n, fill = Weekday)) + geom_bar(stat = "identity", 
+  color = "gray30") + labs(x = "", y = "Count of Accidents", 
+    title = "Accidents by Day") + 
+  scale_fill_brewer(palette=("Oranges")) +
+  theme_light(base_size = 18) + scale_y_continuous(labels = scales::comma)
+```
+
+
+```{r}
+# ---   Weekday and accident count by Severity   ------
+pal = brewer.pal(3, "YlOrRd")
+df %>% group_by(Weekday, Weekdaya, Severity) %>%
+  summarise(n = n()) %>%
+  ggplot(aes(Weekdaya, n, fill = Severity)) + geom_bar(stat = "identity") +
+  facet_grid(~Severity) + theme_light(base_size = 18) +
+  labs(x = "", y = "Count of Accidents", 
+       title = "Accidents by Day & Severity") +
+  #scale_fill_brewer(palette=("Oranges")) + 
+  scale_fill_manual(values=pal) + 
+  theme(strip.background = element_rect(fill="grey90")) +
+  theme(strip.text = element_text(size = 16, color = 'black')) +
+  scale_y_continuous(labels = scales::comma)
+```
+
+
+```{r}
+#--------------------------------------
+#####        by hour of day      ######
+#--------------------------------------
+
+df %>% group_by(hr) %>%
+  summarise(n = n()) %>%
+  ggplot(aes(hr, n)) + geom_bar(stat = "identity", fill = "orange") + 
+  labs(x = "24 Hours of the Day", y = "Count of Accidents", 
+  title = "Accidents by Hour of the Day") + 
+  theme_light(base_size = 18) + scale_y_continuous(labels = scales::comma)
+```
+
+
+```{r}
+# ---   hour of the day and Severity ------
+
+h <- df %>% group_by(hr, Weekday, Weekdaya, Severity) %>%
+  summarise(n = n())
+
+#cols = c("#FD8D3C", "#F03B20", "#BD0026")
+pal = brewer.pal(3, "YlOrRd")
+df %>% group_by(hr, Severity) %>%
+  summarise(n = n()) %>%
+ggplot(aes(hr, n, fill = Severity)) + geom_bar(stat = "identity") + 
+  facet_grid(~Severity) +  labs(x = "24 Hours of the Day", y = "Count of Accidents", 
+     title = "Accidents by Hour & Severity") + theme_light(base_size = 18) +
+  scale_fill_manual(values = pal) +
+  theme(strip.background = element_rect(fill="grey90")) +
+  theme(strip.text = element_text(size = 18, color = 'black')) +
+  scale_y_continuous(labels = scales::comma)
+
+```
+```{r}
+# ---- by Weekday  --------
+df %>% group_by(hr, Weekday) %>%
+  summarise(n = n()) %>%
+  ggplot(aes(hr, n, fill = Weekday)) + 
+  geom_bar(stat = "identity", show.legend = F) +
+  facet_grid(~Weekday) +   labs(x = "24 hours of the day", y = "Count of Accidents", 
+  title = "Accidents by Day & Hour") + theme_light(base_size = 18) +
+  scale_fill_brewer(palette=("Oranges")) + # scale_fill_manual(values=pal) + 
+  theme(strip.background = element_rect(fill="grey90")) +
+  theme(strip.text = element_text(size = 16, color = 'black')) +
+  scale_y_continuous(labels = scales::comma)
+```
+
+
+```{r}
+# ---- by hour, Weekday & Severity  --------
+options(repr.plot.width=14, repr.plot.height=10)
+cols = c("#FD8D3C", "#F03B20", "#BD0026")
+#pal = brewer.pal(3, "YlOrRd")
+ggplot(h, aes(hr, n, fill = Severity)) + geom_bar(stat = "identity") +
+  facet_grid(~Weekday) +  labs(x = "", y = "Count of Accidents", 
+  title = "Accidents by Day & Hour & Severity") + theme_light(base_size = 18) +
+  scale_fill_manual(values = cols) +
+  theme(strip.background = element_rect(fill="grey90")) +
+  theme(strip.text = element_text(size = 18, color = 'black')) +
+  scale_y_continuous(labels = scales::comma)
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+

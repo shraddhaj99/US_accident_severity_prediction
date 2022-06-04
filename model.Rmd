@@ -1,0 +1,454 @@
+---
+title: "Model building"
+output: html_notebook
+---
+Importing necessary libraries
+```{r}
+library(ggplot2)
+library(dplyr)
+library(randomForest)
+library(caTools)
+library(rpart)
+library(caret)
+library(e1071)
+library(ISLR)
+library(randomForest)
+library(mlr3)
+```
+
+Importing data 
+```{r}
+df <- read.csv("D:/Insurance Project/data.csv")
+
+head(df)
+df1 <- df #backup
+```
+Assigning data to another dataframe
+```{r}
+road <- df1
+```
+Since the data is huge over 3 million rows, a sample of 50000 rows is taken for modeling
+```{r}
+road <- road[sample(nrow(road),50000),] #sample
+
+head(road)
+```
+Columns of the dataframe
+```{r}
+colnames(road)
+```
+```{r}
+dim(road) #dimension
+```
+Converting character type date columns to datetime type
+```{r}
+# fix datetime type
+road$Start_Time <- as.Date(road$Start_Time)
+road$End_Time <- as.Date(road$End_Time)
+road$Weather_Timestamp = as.Date(road$Weather_Timestamp)
+```
+
+How many null values are there in the dataframe?
+```{r}
+sum(is.na(road))   # is.na = null values 
+```
+
+```{r}
+(colSums(is.na(road))/50000)*100 #percentage of missing vals
+```
+
+Removing all the null values in the dataframe
+```{r}
+road <- road[complete.cases(road),]
+```
+
+Updated dataframe size
+```{r}
+dim(road)
+```
+All null values are removed
+```{r}
+sum(is.na(road))
+```
+Converting integer type as factor type for the target column
+```{r}
+road$Severity <- as.factor(road$Severity)
+```
+
+Value counts of each level in the target
+```{r}
+table(road$Severity)
+```
+there is imbalance in the target class. seeing it in percentage-
+```{r}
+prop.table(table(road$Severity))
+```
+
+```{r}
+# random sampling package
+#install.packages("ROSE")
+library(ROSE)
+
+#doing both oversampling and undersampling to overcome this problem
+bal_both <- ovun.sample(Severity ~ ., data = road, method = "both", p=0.5,                             N=1000, seed = 1)$data
+
+#install.packages("DMwR")
+#install.packages("remotes")
+#remotes::install_github("cran/DMwR")
+
+library(DMwR)
+
+set.seed(9560)
+smote_train <- SMOTE(Severity ~ ., data  = road)                         
+table(smote_train$Severity) 
+
+first <- DMwR::SMOTE(Severity ~ ., road, perc.over = 2000,perc.under=100)
+
+final <- DMwR::SMOTE(Severity ~ ., first, perc.over = 2000,perc.under=200)
+table(final$Severity)
+
+#install.packages("scutr")
+library(scutr)
+
+ret <- SCUT(road, "Severity", undersample = undersample_kmeans)
+table(ret$Severity)
+
+```
+performing random oversampling-
+```{r}
+one <- road[road$Severity == 1,]
+three <- road[road$Severity == 3,]
+four <- road[road$Severity == 4, ]
+```
+replicating Severity = 1 observations 5 times
+```{r}
+one <-do.call("rbind", replicate(5,one,simplify = F))
+dim(one)
+```
+replicating Severity = 3 observations 5 times
+```{r}
+three <- do.call("rbind", replicate(5,three,simplify = F))
+dim(three)
+```
+replicating severity=4 3 times
+```{r}
+four <- do.call("rbind", replicate(3,four,simplify = F))
+dim(four)
+```
+Using bind_rows function from tidyverse package to bind the new replicated rows to the existing dataframe. 
+temp contains all the sampled dataframes combined
+```{r}
+library(tidyverse)
+temp <- bind_rows(road,one,three,four)
+```
+
+```{r}
+head(temp)
+```
+Size of the new dataframe
+```{r}
+dim(temp)
+```
+```{r}
+table(temp$Severity)
+```
+Though there is no complete balance from the sampling, the value counts are better compared to the previous one. 
+```{r}
+prop.table(table(temp$Severity))
+```
+```{r}
+str(temp)
+```
+```{r}
+head(temp)
+```
+Converting all character datatypes to factors and object datatypes to integer type
+```{r}
+#convert to factors
+temp$Street <- as.factor(temp$Street)
+temp$Side <- as.factor(temp$Side)
+temp$City <- as.factor(temp$City)
+temp$State <- as.factor(temp$State)
+temp$Zipcode <- as.integer(temp$Zipcode)
+temp$Country <- as.factor(temp$Country)
+temp$Timezone <- as.factor(temp$Timezone)
+temp$Airport_Code <- as.factor(temp$Airport_Code)
+temp$Wind_Direction <- as.factor(temp$Wind_Direction)
+temp$Weather_Condition <-as.factor(temp$Weather_Condition)
+temp$Amenity <- as.factor(temp$Amenity)
+temp$Bump <- as.factor(temp$Bump)
+temp$Crossing <- as.factor(temp$Crossing)
+temp$Give_Way <- as.factor(temp$Give_Way)
+temp$Junction <- as.factor(temp$Junction)
+temp$No_Exit <- as.factor(temp$No_Exit)
+temp$Railway <- as.factor(temp$Railway)
+temp$Roundabout <- as.factor(temp$Roundabout)
+temp$Station <- as.factor(temp$Station)
+temp$Stop <- as.factor(temp$Stop)
+temp$Traffic_Calming <- as.factor(temp$Traffic_Calming)
+temp$Traffic_Signal <- as.factor(temp$Traffic_Signal)
+temp$Turning_Loop <- as.factor(temp$Turning_Loop)
+temp$Sunrise_Sunset <- as.factor(temp$Sunrise_Sunset)
+temp$Civil_Twilight <- as.factor(temp$Civil_Twilight)
+temp$Nautical_Twilight <- as.factor(temp$Nautical_Twilight)
+temp$Astronomical_Twilight <- as.factor(temp$Astronomical_Twilight)
+
+```
+Removing variables that are repetitive or those which do not have impact on accident severity
+```{r}
+temp$ID = NULL
+temp$Description = NULL
+temp$Distance.mi. = NULL
+temp$End_Time = NULL
+temp$End_Lat = NULL
+temp$End_Lng = NULL
+temp$Number = NULL
+temp$Wind_Chill.F. = NULL #irrelevant
+temp$County = NULL
+
+temp$Turning_Loop <- NULL #one factor
+temp$Country <- NULL
+
+temp$Street <- NULL
+temp$Zipcode <- NULL
+```
+
+Resulting dataframe contains 34 columns and 17178 observations
+```{r}
+head(temp)
+```
+```{r}
+dim(temp)
+```
+Saving target variable in an array as it doesnt need to be encoded and scaled. 
+```{r}
+sev <- temp$Severity
+```
+
+```{r}
+pairs(temp[1:12])
+```
+Hierarchical Clustering
+Scaling the values
+```{r}
+library(caret)
+process <- preProcess(as.data.frame(temp), method = c("range"))
+norm_scale <- predict(process, as.data.frame(temp))
+```
+
+Storing distance between variables in distance
+```{r}
+distance = dist(norm_scale)
+```
+Performing clustering and plotting it
+```{r}
+temp.hclust = hclust(distance)
+plot(temp.hclust)
+plot(temp.hclust,labels=temp$Severity,main='Default from hclust')
+plot(temp.hclust,hang=-1, labels=temp$Severity,main='Default from hclust')
+```
+These dendograms show the resulting clusters
+
+```{r}
+temp.hclust<-hclust(distance,method="average") 
+plot(temp.hclust,hang=-1) 
+```
+Four main clusters formed are given below:
+1 -- 9530
+2 -- 5322
+3 -- 2318
+4 -- 8
+```{r}
+member = cutree(temp.hclust,4)
+table(member)
+member
+```
+
+Clustering using Kmodes
+```{r}
+#install.packages("klaR")
+library(klaR)
+cluster.results <-kmodes(temp[,-1], 4, iter.max = 10, weighted = FALSE ) 
+```
+
+```{r}
+cluster.results
+```
+Attaching the clustering result as a column to the dataframe using cbind.
+```{r}
+cluster.output <- cbind(temp,cluster.results$cluster)
+```
+
+```{r}
+cluster.output
+```
+
+```{r}
+#install.packages("ggpubr")
+library(ggpubr)
+#install.packages("factoextra")
+library(factoextra)
+```
+
+Plotting the clusters from Kmodes
+```{r}
+plot(temp[,2:5],col= cluster.results$cluster)
+```
+Encoding character values using dummyVars
+```{r}
+library(caret)
+dmy <- dummyVars(" ~.", data=temp)
+dat_transformed <- data.frame(predict(dmy, newdata = temp))
+
+glimpse(dat_transformed)
+
+```
+
+Storing the encoded dataframe in df1
+```{r}
+df1 <- dat_transformed
+```
+
+Removing redundant columns which were added in the encoding process
+```{r}
+df1$Severity.1 <- NULL
+df1$Severity.2 <- NULL
+df1$Severity.3 <- NULL
+df1$Severity.4 <- NULL
+df1$Street.0S539.Summit.Ave <- NULL
+df1$Side.L <- NULL
+df1$City.Aberdeen <- NULL
+df1$State.AL <- NULL
+df1$Timezone.US.Central <- NULL
+df1$Airport_Code.K04W <- NULL
+df1$Wind_Direction.CALM <- NULL
+df1$Weather_Condition.Blowing.Snow <- NULL
+df1$Amenity.FALSE <- NULL
+df1$Bump.FALSE <- NULL
+df1$Crossing.FALSE <- NULL
+df1$Give_Way.FALSE <- NULL
+df1$Junction.FALSE <- NULL
+df1$No_Exit.FALSE <- NULL
+df1$Railway.FALSE <- NULL
+df1$Roundabout.FALSE <- NULL
+df1$Station.FALSE <- NULL
+df1$Stop.FALSE <- NULL
+df1$Traffic_Calming.FALSE <- NULL
+df1$Traffic_Signal.FALSE <- NULL
+df1$Sunrise_Sunset.Night <- NULL
+df1$Civil_Twilight.Night <- NULL
+df1$Nautical_Twilight.Night <- NULL
+df1$Astronomical_Twilight.Night <- NULL
+
+```
+
+Scaling the numerical values using minmax scaler
+```{r}
+#minmax
+process <- preProcess(as.data.frame(df1), method = c("range"))
+norm_scale <- predict(process, as.data.frame(df1))
+```
+
+```{r}
+head(norm_scale)
+```
+
+
+```{r}
+df2 <- norm_scale #encoded and scaled data
+head(df2)
+```
+Since target was taken out from the dataframe before encoding and scaling, it will be added back to the dataframe. 
+```{r}
+df2$Severity <- sev
+```
+
+Train test split from caTools package
+```{r}
+library(caTools)
+set.seed(100)
+sample = sample.split(df2$Severity, SplitRatio = 0.75)
+train = subset(df2, sample == T)
+test = subset(df2, sample == F)
+```
+Shape of train data
+```{r}
+dim(train)
+```
+Shape of test data
+```{r}
+dim(test)
+```
+Model building:
+
+# SVM-
+SVM function is taken from e1071 package. 
+Since the target values have 4 levels, this is a multiclass classification. Therefore, the kernal used in SVM is "radial" as multiclass classification requires a hyperplane. 
+```{r}
+library(e1071)
+svm1 <- svm(Severity~., data=train, 
+          method="C-classification", kernal="radial", 
+          gamma=0.1, cost=10)
+```
+
+Summary of the resultant model
+```{r}
+summary(svm1)
+```
+
+Testing it on test data
+```{r}
+prediction <- predict(svm1, test)
+xtab <- table(test$Severity, prediction)
+xtab
+```
+
+Overall accuracy of the model
+```{r}
+#accuracy
+sum(diag(xtab))/sum(xtab)
+```
+
+Accuracy of prediction for each class
+```{r}
+diag(xtab)/rowSums(xtab) # for each class per obs
+```
+
+Cross validation for SVM using tune() function
+```{r}
+set.seed (1)
+tune.out=tune(svm ,Severity~.,data=train ,kernel ="radial", ranges =list(cost=c(0.1, 1,10,100)))
+```
+
+Summary of tune model
+```{r}
+summary(tune.out)
+```
+
+Best model
+```{r}
+bestmod = tune.out$best.model
+
+bestmod
+```
+
+Random forest
+Building model using rpart function from rpart package
+```{r}
+library(rpart)
+set.seed(12345)
+# Training with classification tree
+modfit.rpart <- rpart(Severity ~ ., data=train, method="class", xval = 4)
+print(modfit.rpart, digits = 3)
+```
+
+Predicting test set with the trained model
+```{r}
+predictions1 <- predict(modfit.rpart, test , type = "class")
+
+# Accuracy and other metrics
+library(caret)
+confusionMatrix(predictions1, test$Severity)
+```
+
+
